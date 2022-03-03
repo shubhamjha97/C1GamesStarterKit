@@ -1,12 +1,17 @@
-# TODO: rename this
-
+# TODO: rename this file to algo_strategy
+from stable_baselines3 import PPO
 from TerminalGymWrapper import TerminalGymWrapper
 
 if __name__ == "__main__":
-    env = TerminalGymWrapper(config) # TODO: Pass config
-    agent = TerminalAgent() # TODO
+    env = TerminalGymWrapper()
+    agent = PPO("MlpPolicy", env, verbose=1)
+    __learn = True
 
-    done = False
-    while not done:
-        action = env.action_space.sample()
-        observation, reward, done, info = env.step(action)
+    if __learn:
+        agent.learn(total_timesteps=10000)
+    else:
+        done = False
+        observation = env.reset()
+        while not done:
+            action = agent.predict(observation)
+            observation, reward, done, info = env.step(action)

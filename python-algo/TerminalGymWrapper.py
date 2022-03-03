@@ -12,7 +12,9 @@ class TerminalGymWrapper(gym.Wrapper):
 
 
     def __init__(self, config=None):
-        self.num_actions = 6*3*196+1
+        # TODO: call superclass __init__
+        # TODO: Add current health, current SP, MP to state
+        self.num_actions = 6*3*196+1 # TODO: Fix
 
         self.config = config if config else self.load_config()
         initial_state = get_command()
@@ -20,6 +22,10 @@ class TerminalGymWrapper(gym.Wrapper):
 
         self.ARENA_SIZE = self.game_state.ARENA_SIZE
         self.STATIONARY_UNIT_COUNT = 3
+
+        self.CREATE_ACTION = 0
+        self.UPGRADE_ACTION = 1
+        self.DELETE_ACTION = 2
 
         self.WALL = config["unitInformation"][0]["shorthand"]
         self.SUPPORT = config["unitInformation"][1]["shorthand"]
@@ -42,7 +48,7 @@ class TerminalGymWrapper(gym.Wrapper):
 
         for x in range(self.ARENA_SIZE):
             for y in range(self.ARENA_SIZE):
-                env_state[x][y] =
+                env_state[x][y] = # TODO:
 
         return env_state
 
@@ -58,8 +64,6 @@ class TerminalGymWrapper(gym.Wrapper):
         return self.env_state
 
     def step(self, action):
-        reward = 0 # TODO: Calculate reward
-
         if action == self.END_TURN_ACTION:
             self.game_state.submit_turn()
 
@@ -77,8 +81,6 @@ class TerminalGymWrapper(gym.Wrapper):
             elif stateType == 2:
                 debug_write("Got end state, game over. Stopping algo.")
                 self.done = True
-            pass # TODO: end turn
-
 
         x, y, unit, action_ = self.parse_action(action)
 
@@ -99,9 +101,38 @@ class TerminalGymWrapper(gym.Wrapper):
         reward = self.calculate_reward(self.game_state)
         return self.env_state, reward, self.done, None
 
-    def parse_action(action):
-        # TODO: implement
-        pass
+    def parse_action(self, action):
+
+        x, y = None, None # TODO: Calculate x, y
+        unit = None
+        action_ = None
+
+        if action < 673: # Create Stationary Unit
+            action_ = self.CREATE_ACTION
+
+            # Stationary units
+            if action < 197:
+                unit = self.WALL
+            elif action < 393:
+                unit = self.SUPPORT
+            elif action < 589:
+                unit = self.TURRET
+
+            # Mobile units
+            elif action < 617:
+                unit = self.SCOUT
+            elif action < 645:
+                unit = self.DEMOLISHER
+            else:
+                unit = self.INTERCEPTOR
+
+        elif action < 869: # Upgrade unit
+            action_ = self.UPGRADE_ACTION
+            pass
+        else: # Delete unit
+            action_ = self.DELETE_ACTION
+
+        return (x, y, unit, action_)
 
     def calculate_reward(self, game_state):
         return self.my_health - self.enemy_health
