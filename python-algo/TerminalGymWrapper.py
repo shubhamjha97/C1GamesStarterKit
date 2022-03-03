@@ -102,7 +102,9 @@ class TerminalGymWrapper(gym.Wrapper):
         return self.env_state, reward, self.done, None
 
     def parse_action(self, action):
-        x, y = None, None  # TODO: Calculate x, y
+        from random import randrange
+        x,y = randrange(self.ARENA_SIZE/2), randrange(self.ARENA_SIZE/2)
+        # x, y = None, None  # TODO: Calculate x, y
         unit = None
         action_ = None
 
