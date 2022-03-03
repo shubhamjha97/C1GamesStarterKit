@@ -24,18 +24,35 @@ class TerminalGymWrapper(gym.Env):
         self.UPGRADE_ACTION = 1
         self.DELETE_ACTION = 2
 
-        self.WALL = self.config["unitInformation"][0]["shorthand"]
-        self.SUPPORT = self.config["unitInformation"][1]["shorthand"]
-        self.TURRET = self.config["unitInformation"][2]["shorthand"]
-        self.SCOUT = self.config["unitInformation"][3]["shorthand"]
-        self.DEMOLISHER = self.config["unitInformation"][4]["shorthand"]
-        self.INTERCEPTOR = self.config["unitInformation"][5]["shorthand"]
+        self.WALL = self.config["unitInformation"][0]["shorthand"] # 0
+        self.SUPPORT = self.config["unitInformation"][1]["shorthand"] # 1
+        self.TURRET = self.config["unitInformation"][2]["shorthand"] # 2
+        self.SCOUT = self.config["unitInformation"][3]["shorthand"] # 3
+        self.DEMOLISHER = self.config["unitInformation"][4]["shorthand"] # 4
+        self.INTERCEPTOR = self.config["unitInformation"][5]["shorthand"] # 5
+
+        self.unit_to_int = {
+            self.WALL: 0,
+            self.SUPPORT: 1,
+            self.TURRET: 2,
+            self.SCOUT: 3,
+            self.DEMOLISHER: 4,
+            self.INTERCEPTOR: 5
+        }
+
+        self.WALL_IDX = 0
+        self.SUPPORT_IDX = 1
+        self.TURRET_IDX = 2
+        self.SCOUT_IDX = 3
+        self.DEMOLISHER_IDX = 4
+        self.INTERCEPTOR_IDX = 5
+
         self.END_TURN_ACTION = 0
 
         self.STATIONARY_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE * self.ARENA_SIZE / 4
         self.MOBILE_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE
 
-        self.NUM_ACTIONS = 1 + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT
+        self.NUM_ACTIONS = int(1 + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT)
 
         # Gym properties
         self.action_space = spaces.Discrete(n=self.NUM_ACTIONS)
@@ -47,14 +64,14 @@ class TerminalGymWrapper(gym.Env):
     def convert_game_state_to_env_state(self, game_state):
         # TODO: Add current health, current SP, MP to state
         game_map = getattr(game_state.game_map, "_GameMap__map")
-        env_state = np.zeros((self.ARENA_SIZE, self.ARENA_SIZE, self.STATIONARY_UNIT_COUNT))
+        env_state = np.zeros((self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
 
         for x in range(self.ARENA_SIZE):
             for y in range(self.ARENA_SIZE):
                 for unit in game_map[x][y]:
                     env_state[x][y][unit] += 1
 
-        return env_state.flatten()
+        return env_state
 
     def load_config(self):
         game_state_string = get_command()
@@ -87,16 +104,18 @@ class TerminalGymWrapper(gym.Env):
 
         if action_ == 0:  # Place
             if self.game_state.attempt_spawn(unit, [x, y], num=1):  # If successfully spawned
-                self.env_state[x][y][unit] += 1
+                self.env_state[x][y][self.unit_to_int[unit]] += 1
         elif action_ == 1:  # Upgrade
             if self.game_state.attempt_upgrade([x, y]):  # If successfully spawned
-                self.env_state[x][y][unit] += 1
+                for unit in range(self.NUM_UNIT_TYPES):
+                    if self.env_state[x][y][unit]:
+                        self.env_state[x][y][unit] += 1
         elif action_ == 2:  # Delete
             if self.game_state.attempt_remove([x, y]):  # If successfully spawned
-                self.env_state[x][y][unit] = 0
+                self.env_state[x][y] = 0
 
         reward = self.calculate_reward(self.game_state)
-        return self.env_state, reward, self.done, None
+        return self.env_state, reward, self.done, {"episode":None, "is_success":None}
 
     def parse_action(self, action):
         from random import randrange
