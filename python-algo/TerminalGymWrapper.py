@@ -54,6 +54,11 @@ class TerminalGymWrapper(gym.Env):
 
         self.NUM_ACTIONS = int(1 + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT)
 
+        self.COORD_MAP = None
+        with open('python-algo/coord_mapping.json', 'r') as f:
+            self.COORD_MAP = json.load(f)
+        self.COORD_MAP = {int(k):v for k,v in self.COORD_MAP.items()}
+
         # Gym properties
         self.action_space = spaces.Discrete(n=self.NUM_ACTIONS)
         self.observation_space = spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
@@ -119,36 +124,45 @@ class TerminalGymWrapper(gym.Env):
 
     def parse_action(self, action):
         from random import randrange
-        x,y = randrange(self.ARENA_SIZE/2), randrange(self.ARENA_SIZE/2)
+        x,y = randrange(27), randrange(13)
         # x, y = None, None  # TODO: Calculate x, y
         unit = None
         action_ = None
+        offset = 0
 
         if action < 673:  # Create Stationary Unit
             action_ = self.CREATE_ACTION
 
             # Stationary units
-            if action < 197:
+            if action < 197: # 0-196
                 unit = self.WALL
-            elif action < 393:
+                offset = 0
+            elif action < 393: # 197 - 392
                 unit = self.SUPPORT
-            elif action < 589:
+                offset = action - 197
+            elif action < 589: # 393 - 588
                 unit = self.TURRET
+                offset = action - 393
 
             # Mobile units
-            elif action < 617:
+            elif action < 617: # 589 - 616
                 unit = self.SCOUT
-            elif action < 645:
+                offset = action - 589
+            elif action < 645: # 617 - 644
                 unit = self.DEMOLISHER
-            else:
+                offset = action - 617
+            else: # 645 - 672 # TODO: check offsets
                 unit = self.INTERCEPTOR
+                offset = action - 645
 
-        elif action < 869:  # Upgrade unit
+        elif action < 869:  # Upgrade unit (67)
             action_ = self.UPGRADE_ACTION
-            pass
+            offset = action - 672
         else: # (action < 1064), Delete unit
             action_ = self.DELETE_ACTION
+            offset = action - 869
 
+        x, y = self.COORD_MAP[offset]
         return x, y, unit, action_
 
     def calculate_reward(self, game_state):
