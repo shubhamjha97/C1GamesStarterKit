@@ -6,12 +6,11 @@ from gamelib.util import get_command, send_command, debug_write
 import json
 
 
-class TerminalGymWrapper(gym.Wrapper):
+class TerminalGymWrapper(gym.Env):
     def __init__(self, config=None):
-        super().__init__(None)
 
         # Read config and initial state
-        self.config = config if config else self.load_config()
+        self.config = self.load_config()
         initial_state = get_command()
         self.game_state = gamelib.GameState(self.config, initial_state)
 
@@ -25,43 +24,41 @@ class TerminalGymWrapper(gym.Wrapper):
         self.UPGRADE_ACTION = 1
         self.DELETE_ACTION = 2
 
-        self.WALL = config["unitInformation"][0]["shorthand"]
-        self.SUPPORT = config["unitInformation"][1]["shorthand"]
-        self.TURRET = config["unitInformation"][2]["shorthand"]
-        self.SCOUT = config["unitInformation"][3]["shorthand"]
-        self.DEMOLISHER = config["unitInformation"][4]["shorthand"]
-        self.INTERCEPTOR = config["unitInformation"][5]["shorthand"]
+        self.WALL = self.config["unitInformation"][0]["shorthand"]
+        self.SUPPORT = self.config["unitInformation"][1]["shorthand"]
+        self.TURRET = self.config["unitInformation"][2]["shorthand"]
+        self.SCOUT = self.config["unitInformation"][3]["shorthand"]
+        self.DEMOLISHER = self.config["unitInformation"][4]["shorthand"]
+        self.INTERCEPTOR = self.config["unitInformation"][5]["shorthand"]
         self.END_TURN_ACTION = 0
 
         self.STATIONARY_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE * self.ARENA_SIZE / 4
         self.MOBILE_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE
 
-        self.NUM_ACTIONS = 1 + self.USABLE_GRID_POINTS_COUNT + self.USABLE_GRID_POINTS_COUNT + self.USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT
+        self.NUM_ACTIONS = 1 + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT
 
         # Gym properties
-        self._action_space: spaces.Discrete(n=self.NUM_ACTIONS)
-        self._observation_space: spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
-        self._reward_range = (-float("inf"), float("inf"))
+        self.action_space = spaces.Discrete(n=self.NUM_ACTIONS)
+        self.observation_space = spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
+        self.reward_range = (-float("inf"), float("inf"))
         self.done = False
         self.env_state = self.convert_game_state_to_env_state(self.game_state)
 
     def convert_game_state_to_env_state(self, game_state):
         # TODO: Add current health, current SP, MP to state
-        game_map = game_state.game_map.__map
+        game_map = getattr(game_state.game_map, "_GameMap__map")
         env_state = np.zeros((self.ARENA_SIZE, self.ARENA_SIZE, self.STATIONARY_UNIT_COUNT))
 
         for x in range(self.ARENA_SIZE):
             for y in range(self.ARENA_SIZE):
-                for unit in game_map[x,y]:
+                for unit in game_map[x][y]:
                     env_state[x][y][unit] += 1
 
-        return env_state
+        return env_state.flatten()
 
     def load_config(self):
         game_state_string = get_command()
-        parsed_config = None
-        if "replaySave" in game_state_string:
-            parsed_config = json.loads(game_state_string)
+        parsed_config = json.loads(game_state_string)
         return parsed_config
 
     def reset(self, **kwargs):

@@ -60,6 +60,9 @@ class AlgoStrategy(gamelib.AlgoCore):
 
         game_state.submit_turn()
 
+    def submit(self, game_state):
+        game_state.submit_turn()
+
 
     """
     NOTE: All the methods after this point are part of the sample starter-algo

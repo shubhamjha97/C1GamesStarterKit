@@ -7,9 +7,9 @@ from TerminalGymWrapper import TerminalGymWrapper
 if __name__ == "__main__":
     env = TerminalGymWrapper()
     agent = PPO("MlpPolicy", env, verbose=1)
-    __learn = True
+    _learn = True
 
-    if __learn:
+    if _learn:
         agent.learn(total_timesteps=10000)
     else:
         done = False
