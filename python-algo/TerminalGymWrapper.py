@@ -18,6 +18,8 @@ class TerminalGymWrapper(gym.Wrapper):
         # Set up some constants
         self.ARENA_SIZE = self.game_state.ARENA_SIZE
         self.STATIONARY_UNIT_COUNT = 3
+        self.MOBILE_UNIT_COUNT = 3
+        self.NUM_UNIT_TYPES = self.STATIONARY_UNIT_COUNT + self.MOBILE_UNIT_COUNT
 
         self.CREATE_ACTION = 0
         self.UPGRADE_ACTION = 1
@@ -31,13 +33,15 @@ class TerminalGymWrapper(gym.Wrapper):
         self.INTERCEPTOR = config["unitInformation"][5]["shorthand"]
         self.END_TURN_ACTION = 0
 
-        self.USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE * self.ARENA_SIZE / 4
-        self.NUM_ACTIONS = 1 + 196 + 196 + 196 * 3 + 28 * 3
+        self.STATIONARY_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE * self.ARENA_SIZE / 4
+        self.MOBILE_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE
+
+        self.NUM_ACTIONS = 1 + self.USABLE_GRID_POINTS_COUNT + self.USABLE_GRID_POINTS_COUNT + self.USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT
 
         # Gym properties
         self._action_space: spaces.Discrete(n=self.NUM_ACTIONS)
-        self._observation_space: spaces.Box()  # TODO: Define
-        self._reward_range: tuple[SupportsFloat, SupportsFloat]  # TODO: Define
+        self._observation_space: spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
+        self._reward_range = (-float("inf"), float("inf"))
         self.done = False
         self.env_state = self.convert_game_state_to_env_state(self.game_state)
 
@@ -48,7 +52,8 @@ class TerminalGymWrapper(gym.Wrapper):
 
         for x in range(self.ARENA_SIZE):
             for y in range(self.ARENA_SIZE):
-                env_state[x][y] = game_map[x][y]  # TODO:
+                for unit in game_map[x,y]:
+                    env_state[x][y][unit] += 1
 
         return env_state
 

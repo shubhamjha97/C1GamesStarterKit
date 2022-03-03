@@ -1,4 +1,6 @@
 # TODO: rename this file to algo_strategy
+# TODO: Create separate files for train and play
+
 from stable_baselines3 import PPO
 from TerminalGymWrapper import TerminalGymWrapper
 
