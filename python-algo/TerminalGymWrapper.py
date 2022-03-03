@@ -5,21 +5,17 @@ import gamelib
 from gamelib.util import get_command, send_command, debug_write
 import json
 
+
 class TerminalGymWrapper(gym.Wrapper):
-
-    # Observation space:
-    # Action space: (int) 6 units x 3 actions x 196 grid coordinates + 1 (end turn)
-
-
     def __init__(self, config=None):
-        # TODO: call superclass __init__
-        # TODO: Add current health, current SP, MP to state
-        self.num_actions = 6*3*196+1 # TODO: Fix
+        super().__init__(None)
 
+        # Read config and initial state
         self.config = config if config else self.load_config()
         initial_state = get_command()
         self.game_state = gamelib.GameState(self.config, initial_state)
 
+        # Set up some constants
         self.ARENA_SIZE = self.game_state.ARENA_SIZE
         self.STATIONARY_UNIT_COUNT = 3
 
@@ -35,20 +31,24 @@ class TerminalGymWrapper(gym.Wrapper):
         self.INTERCEPTOR = config["unitInformation"][5]["shorthand"]
         self.END_TURN_ACTION = 0
 
-        self._action_space: spaces.Discrete(n=self.num_actions, start=0)
-        self._observation_space: spaces.Box() # TODO: Define
-        self._reward_range: tuple[SupportsFloat, SupportsFloat] # TODO: Define
+        self.USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE * self.ARENA_SIZE / 4
+        self.NUM_ACTIONS = 1 + 196 + 196 + 196 * 3 + 28 * 3
 
-        self.env_state = np.zeros((self.ARENA_SIZE,self.ARENA_SIZE,self.STATIONARY_UNIT_COUNT))
-
+        # Gym properties
+        self._action_space: spaces.Discrete(n=self.NUM_ACTIONS)
+        self._observation_space: spaces.Box()  # TODO: Define
+        self._reward_range: tuple[SupportsFloat, SupportsFloat]  # TODO: Define
+        self.done = False
+        self.env_state = self.convert_game_state_to_env_state(self.game_state)
 
     def convert_game_state_to_env_state(self, game_state):
+        # TODO: Add current health, current SP, MP to state
         game_map = game_state.game_map.__map
         env_state = np.zeros((self.ARENA_SIZE, self.ARENA_SIZE, self.STATIONARY_UNIT_COUNT))
 
         for x in range(self.ARENA_SIZE):
             for y in range(self.ARENA_SIZE):
-                env_state[x][y] = # TODO:
+                env_state[x][y] = game_map[x][y]  # TODO:
 
         return env_state
 
@@ -67,47 +67,41 @@ class TerminalGymWrapper(gym.Wrapper):
         if action == self.END_TURN_ACTION:
             self.game_state.submit_turn()
 
+            game_state_string = ""
             while "turnInfo" not in game_state_string:
                 game_state_string = get_command()
 
             state = json.loads(game_state_string)
             stateType = int(state.get("turnInfo")[0])
             if stateType == 0:
-                """
-                This is the game turn game state message. Algo must now print to stdout 2 lines, one for build phase one for
-                deploy phase. Printing is handled by the provided functions.
-                """
-                self.on_turn(game_state_string) # TODO: Update state
+                debug_write("Got new game state. Updating Gym wrapper state.")
+                self.game_state = gamelib.GameState(self.config, game_state_string)
+                self.env_state = self.convert_game_state_to_env_state(self.game_state)
             elif stateType == 2:
                 debug_write("Got end state, game over. Stopping algo.")
                 self.done = True
 
         x, y, unit, action_ = self.parse_action(action)
 
-        if action_ == 0: # Place
-            spawn_result = self.game_state.attempt_spawn(unit, [x, y], num=1)
-            if spawn_result: # If successfully spawned
+        if action_ == 0:  # Place
+            if self.game_state.attempt_spawn(unit, [x, y], num=1):  # If successfully spawned
                 self.env_state[x][y][unit] += 1
-        elif action_ == 1: # Upgrade
-            upgrade_result = self.game_state.attempt_upgrade([x, y])
-            if upgrade_result:  # If successfully spawned
+        elif action_ == 1:  # Upgrade
+            if self.game_state.attempt_upgrade([x, y]):  # If successfully spawned
                 self.env_state[x][y][unit] += 1
-        elif action_ == 2: # Delete
-            remove_result = self.game_state.attempt_remove([x, y])
-            if remove_result:  # If successfully spawned
+        elif action_ == 2:  # Delete
+            if self.game_state.attempt_remove([x, y]):  # If successfully spawned
                 self.env_state[x][y][unit] = 0
-
 
         reward = self.calculate_reward(self.game_state)
         return self.env_state, reward, self.done, None
 
     def parse_action(self, action):
-
-        x, y = None, None # TODO: Calculate x, y
+        x, y = None, None  # TODO: Calculate x, y
         unit = None
         action_ = None
 
-        if action < 673: # Create Stationary Unit
+        if action < 673:  # Create Stationary Unit
             action_ = self.CREATE_ACTION
 
             # Stationary units
@@ -126,13 +120,13 @@ class TerminalGymWrapper(gym.Wrapper):
             else:
                 unit = self.INTERCEPTOR
 
-        elif action < 869: # Upgrade unit
+        elif action < 869:  # Upgrade unit
             action_ = self.UPGRADE_ACTION
             pass
-        else: # Delete unit
+        else: # (action < 1064), Delete unit
             action_ = self.DELETE_ACTION
 
-        return (x, y, unit, action_)
+        return x, y, unit, action_
 
     def calculate_reward(self, game_state):
-        return self.my_health - self.enemy_health
+        return game_state.my_health - game_state.enemy_health
