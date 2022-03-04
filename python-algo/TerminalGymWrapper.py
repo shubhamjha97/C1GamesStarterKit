@@ -14,6 +14,8 @@ class TerminalGymWrapper(gym.Env):
     def __init__(self, config=None):
 
         self.turn_idx = 0
+        self.current_turn_count = 0
+        self.CURRENT_TURN_COUNT_THRESH = 20 # Threshold on number of actions per turn
 
         # Set up some constants
         self.STATIONARY_UNIT_COUNT = 3
@@ -140,7 +142,8 @@ class TerminalGymWrapper(gym.Env):
         self.send_command(deploy_string)
 
     def step(self, action):
-        if action == self.END_TURN_ACTION:
+        if action == self.END_TURN_ACTION or self.current_turn_count >= self.CURRENT_TURN_COUNT_THRESH:
+            self.current_turn_count = 0
             debug_write("Performing turn {}.".format(self.turn_idx))
             self.submit_turn()
 
@@ -160,6 +163,7 @@ class TerminalGymWrapper(gym.Env):
             self.turn_idx += 1
             reward = self.calculate_reward(self.game_state)
         else:
+            self.current_turn_count += 1
             x, y, unit, action_ = self.parse_action(action)
 
             if action_ == 0:  # Place
