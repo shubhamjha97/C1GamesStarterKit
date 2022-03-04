@@ -2,4 +2,4 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 #${PYTHON_CMD:-python3} -u "$DIR/algo_strategy.py"
-${PYTHON_CMD:-python3} -u "$DIR/main.py"
+${PYTHON_CMD:-python3} -u "$DIR/RelayServer.py"

@@ -2,16 +2,24 @@ import gym
 import numpy as np
 from gym import spaces
 import gamelib
-from gamelib.util import get_command, send_command, debug_write
+from gamelib.util import debug_write
 import json
-
+from pyRpc import RpcConnection
+import time
+import subprocess
+import signal
 
 class TerminalGymWrapper(gym.Env):
     def __init__(self, config=None):
+        self.engine_process = self.start_engine()
+
+        # Establish RPC connection to server
+        self.remote = RpcConnection("TerminalServer")
+        time.sleep(.1)
 
         # Read config and initial state
         self.config = self.load_config()
-        initial_state = get_command()
+        initial_state = self.get_command()
         self.game_state = gamelib.GameState(self.config, initial_state)
 
         # Set up some constants
@@ -40,13 +48,6 @@ class TerminalGymWrapper(gym.Env):
             self.INTERCEPTOR: 5
         }
 
-        self.WALL_IDX = 0
-        self.SUPPORT_IDX = 1
-        self.TURRET_IDX = 2
-        self.SCOUT_IDX = 3
-        self.DEMOLISHER_IDX = 4
-        self.INTERCEPTOR_IDX = 5
-
         self.END_TURN_ACTION = 0
 
         self.STATIONARY_USABLE_GRID_POINTS_COUNT = self.ARENA_SIZE * self.ARENA_SIZE / 4
@@ -55,16 +56,36 @@ class TerminalGymWrapper(gym.Env):
         self.NUM_ACTIONS = int(1 + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT + self.STATIONARY_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT + self.MOBILE_USABLE_GRID_POINTS_COUNT * self.MOBILE_UNIT_COUNT)
 
         self.COORD_MAP = None
+        # TODO: add logic here instead of reading file
         with open('python-algo/coord_mapping.json', 'r') as f:
             self.COORD_MAP = json.load(f)
         self.COORD_MAP = {int(k):v for k,v in self.COORD_MAP.items()}
 
         # Gym properties
         self.action_space = spaces.Discrete(n=self.NUM_ACTIONS)
+        # TODO: Convert to dict
         self.observation_space = spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
         self.reward_range = (-float("inf"), float("inf"))
         self.done = False
         self.env_state = self.convert_game_state_to_env_state(self.game_state)
+
+    def start_engine(self):
+        return subprocess.Popen("cd /Users/sjha/Documents/C1GamesStarterKit; ./scripts/run_match.sh python-algo python-algo-orig", shell=True)
+
+    def stop_engine(self):
+        self.engine_process.send_signal(signal.SIGINT)
+
+    def restart_engine(self):
+        if self.engine_process:
+            self.stop_engine()
+        self.start_engine()
+
+    def get_command(self):
+        resp = self.remote.call("get_command")
+        return resp.result
+
+    def send_command(self, cmd):
+        self.remote.call("send_command", args=[cmd])
 
     def convert_game_state_to_env_state(self, game_state):
         # TODO: Add current health, current SP, MP to state
@@ -79,7 +100,7 @@ class TerminalGymWrapper(gym.Env):
         return env_state
 
     def load_config(self):
-        game_state_string = get_command()
+        game_state_string = self.get_command()
         parsed_config = json.loads(game_state_string)
         return parsed_config
 
@@ -87,13 +108,20 @@ class TerminalGymWrapper(gym.Env):
         self.done = False
         return self.env_state
 
+    def submit_turn(self):
+        # TODO
+        build_string = json.dumps(self.game_state._build_stack)
+        deploy_string = json.dumps(self.game_state._deploy_stack)
+        self.send_command(build_string)
+        self.send_command(deploy_string)
+
     def step(self, action):
         if action == self.END_TURN_ACTION:
-            self.game_state.submit_turn()
+            self.submit_turn()
 
             game_state_string = ""
             while "turnInfo" not in game_state_string:
-                game_state_string = get_command()
+                game_state_string = self.get_command()
 
             state = json.loads(game_state_string)
             stateType = int(state.get("turnInfo")[0])
@@ -119,6 +147,7 @@ class TerminalGymWrapper(gym.Env):
             if self.game_state.attempt_remove([x, y]):  # If successfully spawned
                 self.env_state[x][y] = 0
 
+        # TODO: give reward only after end action
         reward = self.calculate_reward(self.game_state)
         return self.env_state, reward, self.done, {"episode":None, "is_success":None}
 
@@ -167,3 +196,14 @@ class TerminalGymWrapper(gym.Env):
 
     def calculate_reward(self, game_state):
         return game_state.my_health - game_state.enemy_health
+
+    def close(self):
+        self.stop_engine()
+
+if __name__=='__main__':
+    env = TerminalGymWrapper()
+    done = False
+    observation = env.reset()
+    while not done:
+        action = env.action_space.sample()
+        observation, reward, done, info = env.step(action)
