@@ -1,3 +1,5 @@
+import logging
+
 import gym
 import numpy as np
 from gym import spaces
@@ -7,11 +9,11 @@ import json
 import time
 import subprocess
 import signal
-import threading
 from xmlrpc.client import ServerProxy
+import logging
 
 class TerminalGymWrapper(gym.Env):
-    def __init__(self, config=None):
+    def __init__(self):
 
         self.turn_idx = 0
         self.current_turn_count = 0
@@ -66,16 +68,22 @@ class TerminalGymWrapper(gym.Env):
         # Gym properties
         self.action_space = spaces.Discrete(n=self.NUM_ACTIONS)
         # TODO: Convert to dict
-        self.observation_space = spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
+        self.observation_space = gym.spaces.Dict(
+            {
+                'grid': spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES)),
+                'mp': spaces.Discrete(100),
+                'sp': spaces.Discrete(100),
+                'health': spaces.Discrete(100),
+            }
+        )
         self.reward_range = (-float("inf"), float("inf"))
         self.done = False
 
 
     def start_engine(self):
-        debug_write("Starting engine.")
         self.engine_process = subprocess.Popen(
             "cd /Users/sjha/Documents/C1GamesStarterKit; ./scripts/run_match.sh python-algo python-algo-orig",
-            shell=True)
+            shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         time.sleep(3)
 
         # Establish RPC connection to server
@@ -85,6 +93,7 @@ class TerminalGymWrapper(gym.Env):
         self.config = self.load_config()
         initial_state = self.get_command()
         self.game_state = gamelib.GameState(self.config, initial_state)
+        self.game_state.suppress_warnings(True)
         self.ARENA_SIZE = self.game_state.ARENA_SIZE
         self.env_state = self.convert_game_state_to_env_state(self.game_state)
 
@@ -94,16 +103,12 @@ class TerminalGymWrapper(gym.Env):
     def stop_engine(self):
         self.kill_rpc()
         time.sleep(1)
-        debug_write("Sending SIGKILL.")
         self.engine_process.send_signal(signal.SIGKILL)
 
     def restart_engine(self):
         self.stop_engine()
-        debug_write("Engine stopped.")
         time.sleep(3)
-        debug_write("Restarting engine.")
         self.start_engine()
-        debug_write("Engine restaeted") # TODO: remove
 
     def get_command(self):
         resp = self.remote.get_command()
@@ -125,15 +130,22 @@ class TerminalGymWrapper(gym.Env):
         return env_state
 
     def load_config(self):
-        debug_write("loading config")
         game_state_string = self.get_command()
         parsed_config = json.loads(game_state_string)
         return parsed_config
 
+    def create_state_rep(self, grid, mp, sp, health):
+        return {
+                'grid': grid,
+                'mp': mp,
+                'sp': sp,
+                'health': health,
+            }
+
     def reset(self, **kwargs):
         self.restart_engine()
         self.done = False
-        return self.env_state
+        return self.create_state_rep(self.env_state, self.game_state.MP, self.game_state.SP, self.game_state.my_health)
 
     def submit_turn(self):
         build_string = json.dumps(self.game_state._build_stack)
@@ -144,7 +156,6 @@ class TerminalGymWrapper(gym.Env):
     def step(self, action):
         if action == self.END_TURN_ACTION or self.current_turn_count >= self.CURRENT_TURN_COUNT_THRESH:
             self.current_turn_count = 0
-            debug_write("Performing turn {}.".format(self.turn_idx))
             self.submit_turn()
 
             stateType = 1
@@ -154,11 +165,10 @@ class TerminalGymWrapper(gym.Env):
                 stateType = int(state.get("turnInfo")[0])
 
             if stateType == 0:
-                debug_write("Got new game state. Updating Gym wrapper state.")
                 self.game_state = gamelib.GameState(self.config, game_state_string)
+                self.game_state.suppress_warnings(True)
                 self.env_state = self.convert_game_state_to_env_state(self.game_state)
             elif stateType == 2:
-                debug_write("Got end state, game over. Stopping algo.")
                 self.done = True
             self.turn_idx += 1
             reward = self.calculate_reward(self.game_state)
@@ -179,7 +189,7 @@ class TerminalGymWrapper(gym.Env):
                     self.env_state[x][y] = 0
             reward = 0.0
 
-        return self.env_state, reward, self.done, {"episode":None, "is_success":None}
+        return self.create_state_rep(self.env_state, self.game_state.MP, self.game_state.SP, self.game_state.my_health), reward, self.done, {"episode":None, "is_success":None}
 
     def parse_action(self, action):
         from random import randrange
