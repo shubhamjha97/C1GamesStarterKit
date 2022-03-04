@@ -4,26 +4,18 @@ from gym import spaces
 import gamelib
 from gamelib.util import debug_write
 import json
-from pyRpc import RpcConnection
 import time
 import subprocess
 import signal
+import threading
+from xmlrpc.client import ServerProxy
 
 class TerminalGymWrapper(gym.Env):
     def __init__(self, config=None):
-        self.engine_process = self.start_engine()
 
-        # Establish RPC connection to server
-        self.remote = RpcConnection("TerminalServer")
-        time.sleep(.1)
-
-        # Read config and initial state
-        self.config = self.load_config()
-        initial_state = self.get_command()
-        self.game_state = gamelib.GameState(self.config, initial_state)
+        self.turn_idx = 0
 
         # Set up some constants
-        self.ARENA_SIZE = self.game_state.ARENA_SIZE
         self.STATIONARY_UNIT_COUNT = 3
         self.MOBILE_UNIT_COUNT = 3
         self.NUM_UNIT_TYPES = self.STATIONARY_UNIT_COUNT + self.MOBILE_UNIT_COUNT
@@ -31,6 +23,8 @@ class TerminalGymWrapper(gym.Env):
         self.CREATE_ACTION = 0
         self.UPGRADE_ACTION = 1
         self.DELETE_ACTION = 2
+
+        self.start_engine()
 
         self.WALL = self.config["unitInformation"][0]["shorthand"] # 0
         self.SUPPORT = self.config["unitInformation"][1]["shorthand"] # 1
@@ -41,11 +35,17 @@ class TerminalGymWrapper(gym.Env):
 
         self.unit_to_int = {
             self.WALL: 0,
+            "Enemy " + self.WALL: 0,
             self.SUPPORT: 1,
+            "Enemy " + self.SUPPORT: 1,
             self.TURRET: 2,
+            "Enemy " + self.TURRET: 2,
             self.SCOUT: 3,
+            "Enemy " + self.SCOUT: 3,
             self.DEMOLISHER: 4,
-            self.INTERCEPTOR: 5
+            "Enemy " + self.DEMOLISHER: 4,
+            self.INTERCEPTOR: 5,
+            "Enemy " + self.INTERCEPTOR: 5,
         }
 
         self.END_TURN_ACTION = 0
@@ -67,25 +67,48 @@ class TerminalGymWrapper(gym.Env):
         self.observation_space = spaces.Box(low=0.0, high=100.0, shape=(self.ARENA_SIZE, self.ARENA_SIZE, self.NUM_UNIT_TYPES))
         self.reward_range = (-float("inf"), float("inf"))
         self.done = False
-        self.env_state = self.convert_game_state_to_env_state(self.game_state)
+
 
     def start_engine(self):
-        return subprocess.Popen("cd /Users/sjha/Documents/C1GamesStarterKit; ./scripts/run_match.sh python-algo python-algo-orig", shell=True)
+        debug_write("Starting engine.")
+        self.engine_process = subprocess.Popen(
+            "cd /Users/sjha/Documents/C1GamesStarterKit; ./scripts/run_match.sh python-algo python-algo-orig",
+            shell=True)
+        time.sleep(3)
+
+        # Establish RPC connection to server
+        self.remote = ServerProxy('http://localhost:50000', verbose=False, allow_none=True)
+
+        # Read config and initial state
+        self.config = self.load_config()
+        initial_state = self.get_command()
+        self.game_state = gamelib.GameState(self.config, initial_state)
+        self.ARENA_SIZE = self.game_state.ARENA_SIZE
+        self.env_state = self.convert_game_state_to_env_state(self.game_state)
+
+    def kill_rpc(self):
+        self.remote.kill()
 
     def stop_engine(self):
-        self.engine_process.send_signal(signal.SIGINT)
+        self.kill_rpc()
+        time.sleep(1)
+        debug_write("Sending SIGKILL.")
+        self.engine_process.send_signal(signal.SIGKILL)
 
     def restart_engine(self):
-        if self.engine_process:
-            self.stop_engine()
+        self.stop_engine()
+        debug_write("Engine stopped.")
+        time.sleep(3)
+        debug_write("Restarting engine.")
         self.start_engine()
+        debug_write("Engine restaeted") # TODO: remove
 
     def get_command(self):
-        resp = self.remote.call("get_command")
-        return resp.result
+        resp = self.remote.get_command()
+        return resp
 
     def send_command(self, cmd):
-        self.remote.call("send_command", args=[cmd])
+        self.remote.send_command(cmd)
 
     def convert_game_state_to_env_state(self, game_state):
         # TODO: Add current health, current SP, MP to state
@@ -95,21 +118,22 @@ class TerminalGymWrapper(gym.Env):
         for x in range(self.ARENA_SIZE):
             for y in range(self.ARENA_SIZE):
                 for unit in game_map[x][y]:
-                    env_state[x][y][unit] += 1
+                    env_state[x][y][self.unit_to_int[unit.unit_type]] += 1 # TODO: Treat own and enemy units differently
 
         return env_state
 
     def load_config(self):
+        debug_write("loading config")
         game_state_string = self.get_command()
         parsed_config = json.loads(game_state_string)
         return parsed_config
 
     def reset(self, **kwargs):
+        self.restart_engine()
         self.done = False
         return self.env_state
 
     def submit_turn(self):
-        # TODO
         build_string = json.dumps(self.game_state._build_stack)
         deploy_string = json.dumps(self.game_state._deploy_stack)
         self.send_command(build_string)
@@ -117,14 +141,15 @@ class TerminalGymWrapper(gym.Env):
 
     def step(self, action):
         if action == self.END_TURN_ACTION:
+            debug_write("Performing turn {}.".format(self.turn_idx))
             self.submit_turn()
 
-            game_state_string = ""
-            while "turnInfo" not in game_state_string:
+            stateType = 1
+            while stateType == 1:
                 game_state_string = self.get_command()
+                state = json.loads(game_state_string)
+                stateType = int(state.get("turnInfo")[0])
 
-            state = json.loads(game_state_string)
-            stateType = int(state.get("turnInfo")[0])
             if stateType == 0:
                 debug_write("Got new game state. Updating Gym wrapper state.")
                 self.game_state = gamelib.GameState(self.config, game_state_string)
@@ -132,23 +157,24 @@ class TerminalGymWrapper(gym.Env):
             elif stateType == 2:
                 debug_write("Got end state, game over. Stopping algo.")
                 self.done = True
+            self.turn_idx += 1
+            reward = self.calculate_reward(self.game_state)
+        else:
+            x, y, unit, action_ = self.parse_action(action)
 
-        x, y, unit, action_ = self.parse_action(action)
+            if action_ == 0:  # Place
+                if self.game_state.attempt_spawn(unit, [x, y], num=1):  # If successfully spawned
+                    self.env_state[x][y][self.unit_to_int[unit]] += 1
+            elif action_ == 1:  # Upgrade
+                if self.game_state.attempt_upgrade([x, y]):  # If successfully spawned
+                    for unit in range(self.NUM_UNIT_TYPES):
+                        if self.env_state[x][y][unit]:
+                            self.env_state[x][y][unit] += 1
+            elif action_ == 2:  # Delete
+                if self.game_state.attempt_remove([x, y]):  # If successfully spawned
+                    self.env_state[x][y] = 0
+            reward = 0.0
 
-        if action_ == 0:  # Place
-            if self.game_state.attempt_spawn(unit, [x, y], num=1):  # If successfully spawned
-                self.env_state[x][y][self.unit_to_int[unit]] += 1
-        elif action_ == 1:  # Upgrade
-            if self.game_state.attempt_upgrade([x, y]):  # If successfully spawned
-                for unit in range(self.NUM_UNIT_TYPES):
-                    if self.env_state[x][y][unit]:
-                        self.env_state[x][y][unit] += 1
-        elif action_ == 2:  # Delete
-            if self.game_state.attempt_remove([x, y]):  # If successfully spawned
-                self.env_state[x][y] = 0
-
-        # TODO: give reward only after end action
-        reward = self.calculate_reward(self.game_state)
         return self.env_state, reward, self.done, {"episode":None, "is_success":None}
 
     def parse_action(self, action):
@@ -202,8 +228,21 @@ class TerminalGymWrapper(gym.Env):
 
 if __name__=='__main__':
     env = TerminalGymWrapper()
+
+    # First
     done = False
     observation = env.reset()
     while not done:
-        action = env.action_space.sample()
+        action = 0
         observation, reward, done, info = env.step(action)
+
+    # Second
+    done = False
+    observation = env.reset()
+    while not done:
+        action = 0
+        observation, reward, done, info = env.step(action)
+
+    env.stop_engine()
+    debug_write("Completed")
+
