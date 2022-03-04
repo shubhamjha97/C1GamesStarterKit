@@ -7,5 +7,5 @@ from stable_baselines3.common.monitor import Monitor
 
 if __name__ == "__main__":
     env = Monitor(TerminalGymWrapper())
-    agent = PPO("MlpPolicy", env, verbose=1)
-    agent.learn(total_timesteps=10000)
+    agent = PPO("MultiInputPolicy", env, verbose=1)
+    agent.learn(total_timesteps=100000)
